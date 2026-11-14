@@ -44,6 +44,10 @@ Integration tests start their own PostgreSQL and Redis with Testcontainers and d
 All settings come from environment variables; see [`.env.example`](.env.example).
 For local development, `.env` is loaded automatically. Real environment variables take precedence.
 
+## Documentation
+
+- [Design decisions](docs/design-decisions.md): what was decided, the alternatives, and why
+
 ## License
 
 [MIT](LICENSE)
