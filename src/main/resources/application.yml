@@ -11,6 +11,17 @@ spring:
     username: ${POSTGRES_USER:taskflow}
     # No default on purpose: startup must fail if the secret is missing.
     password: ${POSTGRES_PASSWORD}
+    hikari:
+      # Unqualified SQL from the application resolves to the taskflow schema.
+      schema: taskflow
+
+  flyway:
+    # Flyway creates and owns the taskflow schema, and keeps its history table there.
+    schemas: taskflow
+    create-schemas: true
+    locations: classpath:db/migration
+    # Explicit for intent: never allow 'flyway clean' to wipe a database.
+    clean-disabled: true
 
   data:
     redis:
