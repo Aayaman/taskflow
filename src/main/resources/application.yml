@@ -28,3 +28,15 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health is reachable over HTTP; everything else stays internal.
+        include: health
+  endpoint:
+    health:
+      # Show UP/DOWN per component (db, redis) but never their details.
+      show-components: always
+      show-details: never
