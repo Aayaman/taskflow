@@ -15,6 +15,7 @@ New decisions are appended; superseded ones are marked, not deleted.
 | 8  | [Testcontainers for integration tests](#8-testcontainers-for-integration-tests) | Accepted | 2026-11-14 |
 | 9  | [Local services bound to 127.0.0.1 on non-default ports](#9-local-services-bound-to-127001-on-non-default-ports) | Accepted | 2026-11-14 |
 | 10 | [Health endpoint shows component status, never details](#10-health-endpoint-shows-component-status-never-details) | Accepted | 2026-11-14 |
+| 11 | [Five job states, with time-based waiting](#11-five-job-states-with-time-based-waiting) | Accepted | 2026-11-14 |
 
 ---
 
@@ -173,3 +174,33 @@ All dependency versions come from the Spring Boot BOM, the list of library versi
 - *Exposing details locally only (profile-based):* adds configuration paths without a current need.
 
 **Consequences.** A Redis outage marks the application `DOWN` (HTTP 503), even though Redis is not used for processing yet. The liveness group does not include Redis, so an orchestrator would not restart the application because of it. Metrics (`/actuator/prometheus`) are planned for M6.
+
+## 11. Five job states, with time-based waiting
+
+**Context.** A job moves through waiting, execution and an outcome. A state model with many overlapping states makes transitions hard to reason about under concurrency, and mixing delivery details into job state lets the two disagree.
+
+**Decision.**
+- Five states: `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`.
+- Allowed transitions:
+
+  | From | To | Reason |
+  |---|---|---|
+  | `PENDING` | `RUNNING` | A worker claims the job |
+  | `PENDING` | `CANCELLED` | Cancelled before it started |
+  | `RUNNING` | `SUCCEEDED` | Handler finished successfully |
+  | `RUNNING` | `FAILED` | Permanent error, or retries exhausted |
+  | `RUNNING` | `PENDING` | Retry after a failed attempt, or recovery after an expired lease |
+  | `FAILED` | `PENDING` | Manual retry by an operator |
+
+- Waiting for a retry and waiting for a scheduled time are both `PENDING` with a future `run_at`.
+- `SUCCEEDED`, `FAILED` and `CANCELLED` are terminal: the system never moves a job out of them on its own. Only a manual retry can move a `FAILED` job.
+- The rules live in one place (`JobStatus`). Persisted transitions must additionally be conditional on the current state in SQL, so that only one of several concurrent updates succeeds.
+
+**Alternatives considered.**
+- *A `QUEUED` state for "published to the queue":* whether an event reached Redis is a delivery detail. Storing it on the job lets the job and the queue disagree; it belongs to the outbox.
+- *Separate `RETRY` and `SCHEDULED` states:* both mean "eligible at a later time", which `run_at` already expresses.
+- *Separate `FAILED` and `DEAD_LETTER` states:* two terminal failure states with no behavioural difference.
+- *Allowing `RUNNING` to `CANCELLED`:* interrupting a handler in the middle of an external call is unsafe. A cancellation request can be added later if needed.
+- *A PostgreSQL enum type for the status column:* values cannot easily be removed or renamed. `text` with a `CHECK` constraint is easier to evolve.
+
+**Consequences.** Retry, scheduling and recovery all reduce to "set `PENDING` and choose `run_at`". Cancelling a running job is not supported.
