@@ -7,7 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class TaskflowApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(TaskflowApplication.class, args);
+		SpringApplication application = new SpringApplication(TaskflowApplication.class);
+		application.addListeners(new RequiredSettingsCheck());
+		application.run(args);
 	}
 
 }
