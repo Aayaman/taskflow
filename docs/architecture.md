@@ -21,11 +21,11 @@ flowchart LR
 
 | Component | Status | Role today |
 |---|---|---|
-| Spring Boot application | ✅ | Starts, validates required configuration, exposes `/actuator/health` |
-| PostgreSQL | ✅ | Connected; Flyway manages the `taskflow` schema (no tables yet) |
-| Redis | ✅ | Connected and health-checked; not used for processing yet |
-| Docker Compose | ✅ | Runs PostgreSQL and Redis locally on `127.0.0.1` |
-| CI | ✅ | GitHub Actions runs unit and integration tests on every push |
+| Spring Boot application | Done | Starts, validates required configuration, exposes `/actuator/health` |
+| PostgreSQL | Done | Connected; Flyway manages the `taskflow` schema (no tables yet) |
+| Redis | Done | Connected and health-checked; not used for processing yet |
+| Docker Compose | Done | Runs PostgreSQL and Redis locally on `127.0.0.1` |
+| CI | Done | GitHub Actions runs unit and integration tests on every push |
 
 ## Target architecture (planned)
 
@@ -85,7 +85,7 @@ Progress and target dates are tracked in the repository's [GitHub milestones](ht
 
 | Milestone | Goal |
 |---|---|
-| ✅ **M0: Project foundation** | Reproducible environment: application, PostgreSQL, Redis, configuration, tests, CI |
+| **M0: Project foundation** (done) | Reproducible environment: application, PostgreSQL, Redis, configuration, tests, CI |
 | **M1: Job submission & persistence** | Submit, store and retrieve jobs through a validated REST API with idempotent submission |
 | **M2: PostgreSQL-only queue & workers** | Several workers process jobs concurrently, and no job is ever claimed twice |
 | **M3: Reliability & recovery** | Retries with backoff, leases, crash recovery, dead-lettering and attempt history |
