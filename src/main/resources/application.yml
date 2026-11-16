@@ -23,6 +23,11 @@ spring:
     # Explicit for intent: never allow 'flyway clean' to wipe a database.
     clean-disabled: true
 
+  jackson:
+    deserialization:
+      # Reject fields the API does not support instead of silently ignoring them.
+      fail-on-unknown-properties: true
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}

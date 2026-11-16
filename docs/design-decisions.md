@@ -16,6 +16,7 @@ New decisions are appended; superseded ones are marked, not deleted.
 | 9  | [Local services bound to 127.0.0.1 on non-default ports](#9-local-services-bound-to-127001-on-non-default-ports) | Accepted | 2026-11-14 |
 | 10 | [Health endpoint shows component status, never details](#10-health-endpoint-shows-component-status-never-details) | Accepted | 2026-11-14 |
 | 11 | [Five job states, with time-based waiting](#11-five-job-states-with-time-based-waiting) | Accepted | 2026-11-14 |
+| 12 | [Strict request parsing and Problem Details errors](#12-strict-request-parsing-and-problem-details-errors) | Accepted | 2026-11-16 |
 
 ---
 
@@ -204,3 +205,22 @@ All dependency versions come from the Spring Boot BOM, the list of library versi
 - *A PostgreSQL enum type for the status column:* values cannot easily be removed or renamed. `text` with a `CHECK` constraint is easier to evolve.
 
 **Consequences.** Retry, scheduling and recovery all reduce to "set `PENDING` and choose `run_at`". Cancelling a running job is not supported.
+
+## 12. Strict request parsing and Problem Details errors
+
+**Context.** The job API is the system's main entry point. Clients need precise, machine-readable errors, and must never be misled into thinking an unsupported option took effect.
+
+**Decision.**
+- Errors use RFC 9457 Problem Details (`application/problem+json`). Validation errors add an `errors` array of `{field, message}`.
+- Unknown request fields are rejected with `400` and name the field. Spring Boot's default of silently ignoring them is turned off.
+- Requests are validated with Jakarta Bean Validation. Rules that also exist as database constraints (job type format) are kept identical in both places.
+- The job payload must be a JSON object of at most 64 KB, measured as compact UTF-8 JSON, so formatting whitespace does not count.
+- Malformed bodies return a generic "not valid JSON" message rather than parser internals.
+
+**Alternatives considered.**
+- *Ignoring unknown fields:* lenient, but a client sending `priority` before priorities exist would believe it was applied.
+- *Spring's default validation response:* it does not say which fields failed.
+- *A custom error format:* RFC 9457 is a standard that clients and tools already understand.
+- *Measuring the raw request size for the payload limit:* would count whitespace against the client.
+
+**Consequences.** Clients cannot send fields ahead of server support; new optional fields remain backward compatible. The payload limit is checked after the body has been read, so it is a policy, not protection against very large requests. A hard request-size limit belongs at the reverse proxy and is planned with deployment (M8).
