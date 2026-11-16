@@ -3,6 +3,7 @@ package io.github.aayaman.taskflow.job.internal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,6 +37,13 @@ public class JobRepository {
 			.param("payload", json.writeValueAsString(payload))
 			.query(this::mapRow)
 			.single();
+	}
+
+	public Optional<Job> findById(UUID id) {
+		return jdbc.sql("select " + COLUMNS + " from jobs where id = :id")
+			.param("id", id)
+			.query(this::mapRow)
+			.optional();
 	}
 
 	private Job mapRow(ResultSet rs, int rowNum) throws SQLException {

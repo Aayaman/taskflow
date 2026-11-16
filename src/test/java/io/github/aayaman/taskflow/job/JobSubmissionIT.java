@@ -2,14 +2,12 @@ package io.github.aayaman.taskflow.job;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,20 +25,22 @@ import tools.jackson.databind.json.JsonMapper;
 @Import(TestcontainersConfiguration.class)
 class JobSubmissionIT {
 
-	private final HttpClient http = HttpClient.newHttpClient();
-
-	@Value("${local.server.port}")
-	private int port;
-
 	@Autowired
 	private JsonMapper json;
 
 	@Autowired
 	private JdbcClient jdbc;
 
+	private JobApiClient api;
+
+	@BeforeEach
+	void setUp(@Value("${local.server.port}") int port) {
+		api = new JobApiClient(port, json);
+	}
+
 	@Test
 	void acceptsValidJob() {
-		HttpResponse<String> response = submit("""
+		HttpResponse<String> response = api.submit("""
 				{"type": "GENERATE_INVOICE", "payload": {"orderId": "order-12345", "lines": [1, 2]}}""");
 
 		assertThat(response.statusCode()).isEqualTo(201);
@@ -58,7 +58,7 @@ class JobSubmissionIT {
 
 	@Test
 	void persistsSubmittedJob() {
-		JsonNode job = json.readTree(submit("""
+		JsonNode job = json.readTree(api.submit("""
 				{"type": "SEND_EMAIL", "payload": {"to": "user-42"}}""").body());
 
 		String storedPayload = jdbc.sql("select payload::text from jobs where id = :id and status = 'PENDING'")
@@ -70,33 +70,33 @@ class JobSubmissionIT {
 
 	@Test
 	void rejectsMissingFields() {
-		HttpResponse<String> response = submit("{}");
+		HttpResponse<String> response = api.submit("{}");
 
-		assertValidationProblem(response, "type", "is required");
-		assertValidationProblem(response, "payload", "is required");
+		api.assertValidationProblem(response, "type", "is required");
+		api.assertValidationProblem(response, "payload", "is required");
 	}
 
 	@ParameterizedTest
 	@ValueSource(strings = { "send_email", "SEND-EMAIL", "SEND__EMAIL", "_SEND", "" })
 	void rejectsMalformedType(String type) {
-		HttpResponse<String> response = submit("{\"type\": \"" + type + "\", \"payload\": {}}");
+		HttpResponse<String> response = api.submit("{\"type\": \"" + type + "\", \"payload\": {}}");
 
-		assertValidationProblem(response, "type", "must be UPPER_SNAKE_CASE");
+		api.assertValidationProblem(response, "type", "must be UPPER_SNAKE_CASE");
 	}
 
 	@Test
 	void rejectsTypeLongerThan100Characters() {
-		HttpResponse<String> response = submit("{\"type\": \"" + "A".repeat(101) + "\", \"payload\": {}}");
+		HttpResponse<String> response = api.submit("{\"type\": \"" + "A".repeat(101) + "\", \"payload\": {}}");
 
-		assertValidationProblem(response, "type", "must be at most 100 characters");
+		api.assertValidationProblem(response, "type", "must be at most 100 characters");
 	}
 
 	@ParameterizedTest
 	@ValueSource(strings = { "[]", "\"text\"", "42", "true" })
 	void rejectsPayloadThatIsNotAnObject(String payload) {
-		HttpResponse<String> response = submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}");
+		HttpResponse<String> response = api.submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}");
 
-		assertValidationProblem(response, "payload", "must be a JSON object");
+		api.assertValidationProblem(response, "payload", "must be a JSON object");
 	}
 
 	@Test
@@ -104,83 +104,42 @@ class JobSubmissionIT {
 		// {"data":"..."} is 11 bytes of structure plus the string content.
 		String payload = "{\"data\":\"" + "x".repeat(JobPayload.MAX_BYTES - 11) + "\"}";
 
-		assertThat(submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}").statusCode()).isEqualTo(201);
+		assertThat(api.submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}").statusCode()).isEqualTo(201);
 	}
 
 	@Test
 	void rejectsPayloadLargerThan64Kilobytes() {
 		String payload = "{\"data\":\"" + "x".repeat(JobPayload.MAX_BYTES - 10) + "\"}";
 
-		HttpResponse<String> response = submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}");
+		HttpResponse<String> response = api.submit("{\"type\": \"SEND_EMAIL\", \"payload\": " + payload + "}");
 
-		assertValidationProblem(response, "payload", "must be at most 65536 bytes");
+		api.assertValidationProblem(response, "payload", "must be at most 65536 bytes");
 	}
 
 	@Test
 	void rejectsUnknownFields() {
-		HttpResponse<String> response = submit("""
+		HttpResponse<String> response = api.submit("""
 				{"type": "SEND_EMAIL", "payload": {}, "priority": 9}""");
 
-		JsonNode problem = assertProblem(response, 400);
+		JsonNode problem = api.assertProblem(response, 400);
 		assertThat(problem.path("detail").asString()).isEqualTo("Unknown field 'priority'.");
 	}
 
 	@Test
 	void rejectsMalformedJson() {
-		JsonNode problem = assertProblem(submit("{\"type\": \"SEND_EMAIL\", "), 400);
+		JsonNode problem = api.assertProblem(api.submit("{\"type\": \"SEND_EMAIL\", "), 400);
 
 		assertThat(problem.path("detail").asString()).isEqualTo("The request body is not valid JSON.");
 	}
 
 	@Test
 	void rejectsNonJsonContentType() {
-		HttpRequest request = HttpRequest.newBuilder(uri())
+		HttpRequest request = HttpRequest.newBuilder(api.uri(""))
 			.header("Content-Type", "text/plain")
 			.POST(HttpRequest.BodyPublishers.ofString("SEND_EMAIL"))
 			.build();
 
-		assertProblem(send(request), 415);
-	}
-
-	private void assertValidationProblem(HttpResponse<String> response, String field, String messageStart) {
-		JsonNode problem = assertProblem(response, 400);
-		assertThat(problem.path("errors").values())
-			.anySatisfy(error -> {
-				assertThat(error.path("field").asString()).isEqualTo(field);
-				assertThat(error.path("message").asString()).startsWith(messageStart);
-			});
-	}
-
-	private JsonNode assertProblem(HttpResponse<String> response, int status) {
-		assertThat(response.statusCode()).isEqualTo(status);
-		assertThat(response.headers().firstValue("Content-Type")).hasValue("application/problem+json");
-		JsonNode problem = json.readTree(response.body());
-		assertThat(problem.path("status").asInt()).isEqualTo(status);
-		return problem;
-	}
-
-	private HttpResponse<String> submit(String body) {
-		return send(HttpRequest.newBuilder(uri())
-			.header("Content-Type", "application/json")
-			.POST(HttpRequest.BodyPublishers.ofString(body))
-			.build());
-	}
-
-	private HttpResponse<String> send(HttpRequest request) {
-		try {
-			return http.send(request, HttpResponse.BodyHandlers.ofString());
-		}
-		catch (IOException ex) {
-			throw new IllegalStateException(ex);
-		}
-		catch (InterruptedException ex) {
-			Thread.currentThread().interrupt();
-			throw new IllegalStateException(ex);
-		}
-	}
-
-	private URI uri() {
-		return URI.create("http://localhost:" + port + "/api/v1/jobs");
+		api.assertProblem(api.send(request), 415);
 	}
 
 }

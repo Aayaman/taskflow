@@ -1,8 +1,11 @@
 package io.github.aayaman.taskflow.job;
 
 import java.net.URI;
+import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +33,11 @@ class JobController {
 			.buildAndExpand(job.id())
 			.toUri();
 		return ResponseEntity.created(location).body(JobResponse.from(job));
+	}
+
+	@GetMapping("/{id}")
+	JobResponse get(@PathVariable UUID id) {
+		return jobService.find(id).map(JobResponse::from).orElseThrow(() -> new JobNotFoundException(id));
 	}
 
 }

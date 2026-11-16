@@ -1,5 +1,8 @@
 package io.github.aayaman.taskflow.job.internal;
 
+import java.util.Optional;
+import java.util.UUID;
+
 import org.springframework.stereotype.Service;
 
 import io.github.aayaman.taskflow.job.Job;
@@ -19,6 +22,10 @@ public class JobService {
 	 */
 	public Job submit(String type, JsonNode payload) {
 		return jobs.insert(type, payload);
+	}
+
+	public Optional<Job> find(UUID id) {
+		return jobs.findById(id);
 	}
 
 }

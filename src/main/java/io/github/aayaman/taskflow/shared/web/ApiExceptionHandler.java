@@ -1,7 +1,9 @@
 package io.github.aayaman.taskflow.shared.web;
 
 import java.util.Map;
+import java.util.UUID;
 
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
@@ -44,6 +46,19 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		String detail = (ex.getCause() instanceof UnrecognizedPropertyException unknown)
 				? "Unknown field '" + unknown.getPropertyName() + "'."
 				: "The request body is not valid JSON.";
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+		return handleExceptionInternal(ex, problem, headers, status, request);
+	}
+
+	/**
+	 * Explains a malformed path or query parameter, such as a job id that is not a UUID,
+	 * without echoing the raw input back.
+	 */
+	@Override
+	protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException ex, HttpHeaders headers,
+			HttpStatusCode status, WebRequest request) {
+		String expected = UUID.class.equals(ex.getRequiredType()) ? "a UUID" : "a valid value";
+		String detail = "Parameter '" + ex.getPropertyName() + "' must be " + expected + ".";
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
 		return handleExceptionInternal(ex, problem, headers, status, request);
 	}
