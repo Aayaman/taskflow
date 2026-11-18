@@ -21,6 +21,16 @@ docker compose up -d --wait
 curl localhost:8080/actuator/health
 ```
 
+Submit a job and fetch it:
+
+```sh
+curl -i localhost:8080/api/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: 3f0c1d52-order-12345' \
+  -d '{"type": "SEND_EMAIL", "payload": {"to": "user-42"}}'
+curl localhost:8080/api/v1/jobs/<id from the response>
+```
+
 Generate passwords with `openssl rand -hex 24`. Never commit `.env`.
 
 Local services listen on `127.0.0.1` only:
@@ -29,6 +39,16 @@ Local services listen on `127.0.0.1` only:
 |------------|-----------|
 | PostgreSQL | 15432     |
 | Redis      | 6379      |
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/jobs` | Submit a job. Returns `201` and a `Location` header. With an `Idempotency-Key`, a repeated request returns `200` and the original job. |
+| `GET /api/v1/jobs/{id}` | Get a job and its status |
+
+Errors use RFC 9457 Problem Details (`application/problem+json`).
+While the application runs, the OpenAPI spec is at [`/v3/api-docs`](http://localhost:8080/v3/api-docs) and Swagger UI at [`/swagger-ui.html`](http://localhost:8080/swagger-ui.html).
 
 ## Tests
 
@@ -46,7 +66,7 @@ For local development, `.env` is loaded automatically. Real environment variable
 
 ## Roadmap
 
-Currently complete: **M0 (project foundation)**. Next: **M1 (job submission and persistence)**.
+Currently complete: **M0 (project foundation)** and **M1 (job submission and persistence)**. Next: **M2 (PostgreSQL-only queue and workers)**.
 See [the architecture overview](docs/architecture.md#roadmap) for all milestones and the reasoning behind their order.
 
 ## Documentation

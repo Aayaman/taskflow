@@ -45,3 +45,8 @@ management:
       # Show UP/DOWN per component (db, redis) but never their details.
       show-components: always
       show-details: never
+
+springdoc:
+  # The spec (/v3/api-docs) and Swagger UI (/swagger-ui.html) are public for local
+  # development. Restrict or disable them before deploying (M8).
+  default-produces-media-type: application/json
