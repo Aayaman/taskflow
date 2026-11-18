@@ -17,6 +17,7 @@ New decisions are appended; superseded ones are marked, not deleted.
 | 10 | [Health endpoint shows component status, never details](#10-health-endpoint-shows-component-status-never-details) | Accepted | 2026-11-14 |
 | 11 | [Five job states, with time-based waiting](#11-five-job-states-with-time-based-waiting) | Accepted | 2026-11-14 |
 | 12 | [Strict request parsing and Problem Details errors](#12-strict-request-parsing-and-problem-details-errors) | Accepted | 2026-11-16 |
+| 13 | [Idempotent submission resolved by the database](#13-idempotent-submission-resolved-by-the-database) | Accepted | 2026-11-17 |
 
 ---
 
@@ -224,3 +225,23 @@ All dependency versions come from the Spring Boot BOM, the list of library versi
 - *Measuring the raw request size for the payload limit:* would count whitespace against the client.
 
 **Consequences.** Clients cannot send fields ahead of server support; new optional fields remain backward compatible. The payload limit is checked after the body has been read, so it is a policy, not protection against very large requests. A hard request-size limit belongs at the reverse proxy and is planned with deployment (M8).
+
+## 13. Idempotent submission resolved by the database
+
+**Context.** A client that times out cannot tell whether its job was accepted. Retrying without protection can create the same job twice, and job handlers are only expected to tolerate re-execution, not duplicate submissions.
+
+**Decision.**
+- Clients may send an `Idempotency-Key` header (1 to 255 characters). Without it, every submission creates a job.
+- A repeated key with the same type and payload returns `200` with the original job and its `Location`. The same key with a different type or payload returns `422`.
+- Payloads are compared with PostgreSQL jsonb equality, so key order and whitespace do not matter.
+- Uniqueness is enforced by a unique constraint. The insert uses `ON CONFLICT (idempotency_key) DO NOTHING`; when it reports a conflict, a second statement reads the existing job.
+- The two statements deliberately run in separate READ COMMITTED transactions. A conflicting insert waits for the competing transaction to finish, and the following read, as a new statement, sees its committed row.
+- Keys are global and kept forever for now.
+
+**Alternatives considered.**
+- *Check for the key, then insert:* two concurrent requests can both miss the key; one then fails on the unique constraint or, without it, a duplicate job is created.
+- *Catching the unique-violation error:* works, but uses exceptions for an expected outcome and aborts the surrounding transaction.
+- *Comparing payloads in Java:* would make the application, not the source of truth, define what "same request" means.
+- *Returning `409` while the original request is still in progress:* unnecessary here, because the database already serializes the competing inserts.
+
+**Consequences.** Retries are safe for clients that send a key. Keys are never released, so a client cannot reuse a key for a new job, and the table grows with every keyed submission; per-client scoping and key expiry are deferred until there is authentication and a retention policy.

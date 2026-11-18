@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -30,13 +31,41 @@ public class JobRepository {
 
 	/**
 	 * Inserts a new job. The database assigns the id, initial status and timestamps.
+	 * <p>
+	 * Returns empty if the idempotency key is already taken. If a concurrent insert holds
+	 * the same key, PostgreSQL waits for it to commit or roll back before deciding, so
+	 * exactly one insert per key succeeds. A {@code null} key never conflicts.
 	 */
-	public Job insert(String type, JsonNode payload) {
-		return jdbc.sql("insert into jobs (type, payload) values (:type, cast(:payload as jsonb)) returning " + COLUMNS)
+	public Optional<Job> insert(String type, JsonNode payload, @Nullable String idempotencyKey) {
+		return jdbc.sql("""
+				insert into jobs (type, payload, idempotency_key)
+				values (:type, cast(:payload as jsonb), :key)
+				on conflict (idempotency_key) do nothing
+				returning\s""" + COLUMNS)
 			.param("type", type)
 			.param("payload", json.writeValueAsString(payload))
+			.param("key", idempotencyKey)
 			.query(this::mapRow)
-			.single();
+			.optional();
+	}
+
+	/**
+	 * Finds the job holding an idempotency key, and whether it was created from the same
+	 * type and payload. Payloads are compared with jsonb equality, so key order and
+	 * whitespace do not matter.
+	 */
+	public Optional<KeyedJob> findByIdempotencyKey(String idempotencyKey, String type, JsonNode payload) {
+		return jdbc.sql("select " + COLUMNS + """
+				, (type = :type and payload = cast(:payload as jsonb)) as same_request
+				from jobs where idempotency_key = :key""")
+			.param("type", type)
+			.param("payload", json.writeValueAsString(payload))
+			.param("key", idempotencyKey)
+			.query((rs, rowNum) -> new KeyedJob(mapRow(rs, rowNum), rs.getBoolean("same_request")))
+			.optional();
+	}
+
+	public record KeyedJob(Job job, boolean sameRequest) {
 	}
 
 	public Optional<Job> findById(UUID id) {

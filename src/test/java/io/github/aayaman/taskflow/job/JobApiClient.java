@@ -28,10 +28,17 @@ class JobApiClient {
 	}
 
 	HttpResponse<String> submit(String body) {
-		return send(HttpRequest.newBuilder(uri(""))
+		return send(submitRequest(body).build());
+	}
+
+	HttpResponse<String> submit(String body, String idempotencyKey) {
+		return send(submitRequest(body).header("Idempotency-Key", idempotencyKey).build());
+	}
+
+	private HttpRequest.Builder submitRequest(String body) {
+		return HttpRequest.newBuilder(uri(""))
 			.header("Content-Type", "application/json")
-			.POST(HttpRequest.BodyPublishers.ofString(body))
-			.build());
+			.POST(HttpRequest.BodyPublishers.ofString(body));
 	}
 
 	HttpResponse<String> get(String id) {
