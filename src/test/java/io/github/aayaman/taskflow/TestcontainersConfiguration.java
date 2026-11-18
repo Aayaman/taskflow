@@ -12,7 +12,7 @@ import org.testcontainers.utility.DockerImageName;
  * Image tags must match compose.yaml (enforced by {@link ContainerImagesTest}).
  */
 @TestConfiguration(proxyBeanMethods = false)
-class TestcontainersConfiguration {
+public class TestcontainersConfiguration {
 
 	static final String POSTGRES_IMAGE = "postgres:18.7-trixie";
 

@@ -4,25 +4,30 @@ TaskFlow lets applications submit background jobs for asynchronous execution. It
 
 This document separates **what exists today** from **what is planned**. Planned parts are marked as such and may change as milestones are designed. The reasoning behind individual choices is in [design-decisions.md](design-decisions.md).
 
-## Current state (M0)
+## Current state (M1)
 
-The foundation is in place; no job processing exists yet.
+Applications can submit jobs and look them up. Jobs are stored durably, but nothing executes them yet; that starts with workers in M2.
 
 ```mermaid
 flowchart LR
-    client([Client]) -- "GET /actuator/health" --> app
+    client([Client]) -- "POST /api/v1/jobs<br/>GET /api/v1/jobs/{id}" --> api
+    client -- "GET /actuator/health" --> actuator
     subgraph app [TaskFlow application]
+        api[Job API]
         actuator[Actuator health]
         flyway[Flyway migrations]
     end
-    app -- JDBC --> pg[("PostgreSQL 18<br/>schema: taskflow")]
+    api -- JDBC --> pg[("PostgreSQL 18<br/>schema: taskflow<br/>table: jobs")]
+    flyway --> pg
     app -- Lettuce --> redis[(Redis 8)]
 ```
 
 | Component | Status | Role today |
 |---|---|---|
-| Spring Boot application | Done | Starts, validates required configuration, exposes `/actuator/health` |
-| PostgreSQL | Done | Connected; Flyway manages the `taskflow` schema (no tables yet) |
+| Job API | Done | Validates and stores submissions, returns jobs by id, deduplicates retries by `Idempotency-Key` |
+| Job lifecycle | Done | Five states and their allowed transitions are defined and tested; only `PENDING` is written so far |
+| API documentation | Done | OpenAPI spec at `/v3/api-docs`, Swagger UI at `/swagger-ui.html` (local development only) |
+| PostgreSQL | Done | Holds the `jobs` table; constraints mirror the API's validation rules |
 | Redis | Done | Connected and health-checked; not used for processing yet |
 | Docker Compose | Done | Runs PostgreSQL and Redis locally on `127.0.0.1` |
 | CI | Done | GitHub Actions runs unit and integration tests on every push |
@@ -74,10 +79,26 @@ flowchart LR
 
 **Delivery guarantee:** at-least-once. A job can run more than once (for example, if a worker crashes after the side effect but before recording completion), so handlers must be safe to retry. Exactly-once execution is not claimed.
 
-The exact set of job states is designed at the start of M1. Principles already agreed:
-- Job state is separate from delivery state: whether an event reached Redis is tracked in the outbox, not on the job.
-- "Waiting for a retry" and "waiting for a scheduled time" share one waiting state plus a `run_at` time.
-- There is a single terminal failure state.
+### Job states
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING: claimed by a worker
+    PENDING --> CANCELLED: cancelled
+    RUNNING --> SUCCEEDED: handler succeeded
+    RUNNING --> PENDING: retry or lease expired
+    RUNNING --> FAILED: retries exhausted
+    FAILED --> PENDING: manual retry
+    SUCCEEDED --> [*]
+    CANCELLED --> [*]
+```
+
+- `PENDING` covers every kind of waiting: new jobs, retries and scheduled jobs. `run_at` says when the job may run next.
+- `FAILED` is the single terminal failure state and doubles as the dead letter; a job leaves it only through a manual retry.
+- Job state is separate from delivery state: whether an event reached Redis is tracked in the outbox (M4), not on the job.
+
+See [decision 11](design-decisions.md#11-five-job-states-with-time-based-waiting) for the reasoning.
 
 ## Roadmap
 
@@ -86,7 +107,7 @@ Progress and target dates are tracked in the repository's [GitHub milestones](ht
 | Milestone | Goal |
 |---|---|
 | **M0: Project foundation** (done) | Reproducible environment: application, PostgreSQL, Redis, configuration, tests, CI |
-| **M1: Job submission & persistence** | Submit, store and retrieve jobs through a validated REST API with idempotent submission |
+| **M1: Job submission & persistence** (done) | Submit, store and retrieve jobs through a validated REST API with idempotent submission |
 | **M2: PostgreSQL-only queue & workers** | Several workers process jobs concurrently, and no job is ever claimed twice |
 | **M3: Reliability & recovery** | Retries with backoff, leases, crash recovery, dead-lettering and attempt history |
 | **M4: Redis via transactional outbox** | Faster delivery through Redis without risking lost or invisible jobs |
