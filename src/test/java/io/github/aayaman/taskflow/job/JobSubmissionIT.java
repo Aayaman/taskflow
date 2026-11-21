@@ -17,12 +17,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import io.github.aayaman.taskflow.TestJobHandlers;
 import io.github.aayaman.taskflow.TestcontainersConfiguration;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@Import({ TestcontainersConfiguration.class, TestJobHandlers.class })
 class JobSubmissionIT {
 
 	@Autowired
@@ -82,6 +83,23 @@ class JobSubmissionIT {
 		HttpResponse<String> response = api.submit("{\"type\": \"" + type + "\", \"payload\": {}}");
 
 		api.assertValidationProblem(response, "type", "must be UPPER_SNAKE_CASE");
+	}
+
+	@Test
+	void rejectsTypeWithoutHandler() {
+		HttpResponse<String> response = api.submit("{\"type\": \"NO_SUCH_TYPE\", \"payload\": {}}");
+
+		api.assertValidationProblem(response, "type", "has no handler");
+	}
+
+	@Test
+	void reportsOnlyTheFormatProblemForMalformedType() {
+		JsonNode problem = api.assertProblem(api.submit("{\"type\": \"no-such-type\", \"payload\": {}}"), 400);
+
+		assertThat(problem.path("errors").values())
+			.filteredOn(error -> error.path("field").asString().equals("type"))
+			.singleElement()
+			.satisfies(error -> assertThat(error.path("message").asString()).startsWith("must be UPPER_SNAKE_CASE"));
 	}
 
 	@Test

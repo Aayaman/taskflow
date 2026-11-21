@@ -20,12 +20,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import io.github.aayaman.taskflow.TestJobHandlers;
 import io.github.aayaman.taskflow.TestcontainersConfiguration;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@Import({ TestcontainersConfiguration.class, TestJobHandlers.class })
 class JobIdempotencyIT {
 
 	private static final String BODY = """
