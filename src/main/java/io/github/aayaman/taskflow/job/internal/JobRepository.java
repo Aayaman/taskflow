@@ -2,7 +2,10 @@ package io.github.aayaman.taskflow.job.internal;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,7 +21,9 @@ import tools.jackson.databind.json.JsonMapper;
 @Repository
 public class JobRepository {
 
-	private static final String COLUMNS = "id, type, payload::text as payload, status, run_at, created_at, updated_at";
+	private static final String COLUMNS = """
+			id, type, payload::text as payload, status, run_at, created_at, updated_at,
+			worker_id, started_at, finished_at, last_error""";
 
 	private final JdbcClient jdbc;
 
@@ -65,6 +70,39 @@ public class JobRepository {
 			.optional();
 	}
 
+	/**
+	 * Claims up to {@code limit} due PENDING jobs for a worker, oldest {@code run_at} first,
+	 * and marks them RUNNING in one statement.
+	 * <p>
+	 * {@code FOR UPDATE SKIP LOCKED} makes concurrent claimers take disjoint rows: a row
+	 * locked by another claimer is skipped rather than waited for, so no job is claimed
+	 * twice and claimers never block each other. Due-ness uses the database clock, so all
+	 * instances agree on it.
+	 */
+	public List<Job> claim(UUID workerId, int limit) {
+		return jdbc.sql("""
+				with due as materialized (
+				    select id as due_id from jobs
+				    where status = 'PENDING' and run_at <= now()
+				    order by run_at, id
+				    limit :limit
+				    for update skip locked
+				)
+				update jobs
+				set status = 'RUNNING', worker_id = :worker, started_at = now(), updated_at = now()
+				from due
+				where jobs.id = due.due_id
+				returning\s""" + COLUMNS)
+			.param("limit", limit)
+			.param("worker", workerId)
+			.query(this::mapRow)
+			.list()
+			.stream()
+			// RETURNING has no defined order; hand jobs out in claim order.
+			.sorted(Comparator.comparing(Job::runAt).thenComparing(Job::id))
+			.toList();
+	}
+
 	public record KeyedJob(Job job, boolean sameRequest) {
 	}
 
@@ -83,7 +121,16 @@ public class JobRepository {
 				JobStatus.valueOf(rs.getString("status")),
 				rs.getObject("run_at", OffsetDateTime.class).toInstant(),
 				rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-				rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+				rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
+				rs.getObject("worker_id", UUID.class),
+				instant(rs, "started_at"),
+				instant(rs, "finished_at"),
+				rs.getString("last_error"));
+	}
+
+	private static @Nullable Instant instant(ResultSet rs, String column) throws SQLException {
+		OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+		return (value != null) ? value.toInstant() : null;
 	}
 
 }

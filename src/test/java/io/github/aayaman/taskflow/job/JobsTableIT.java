@@ -115,6 +115,33 @@ class JobsTableIT {
 			.single();
 	}
 
+	@Test
+	void rejectsRunningJobWithoutWorkerOrStartTime() {
+		assertRejected("insert into jobs (type, payload, status, started_at) values ('SEND_EMAIL', '{}', 'RUNNING', now())",
+				"jobs_running_has_worker");
+		assertRejected("insert into jobs (type, payload, status, worker_id) values ('SEND_EMAIL', '{}', 'RUNNING', uuidv7())",
+				"jobs_running_has_worker");
+	}
+
+	@Test
+	void acceptsRunningJobWithWorkerAndStartTime() {
+		jdbc.sql("insert into jobs (type, payload, status, worker_id, started_at) values ('SEND_EMAIL', '{}', 'RUNNING', uuidv7(), now())")
+			.update();
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "SUCCEEDED", "FAILED" })
+	void rejectsFinishedJobWithoutFinishTime(String status) {
+		assertRejected("insert into jobs (type, payload, status) values ('SEND_EMAIL', '{}', '" + status + "')",
+				"jobs_finished_has_finished_at");
+	}
+
+	@Test
+	void rejectsLastErrorLongerThan4000Characters() {
+		assertRejected("insert into jobs (type, payload, last_error) values ('SEND_EMAIL', '{}', repeat('e', 4001))",
+				"jobs_last_error_length");
+	}
+
 	private void assertRejected(String sql, String constraint) {
 		assertThatThrownBy(() -> jdbc.sql(sql).update())
 			.isInstanceOf(DataIntegrityViolationException.class)

@@ -3,6 +3,8 @@ package io.github.aayaman.taskflow.job;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
+
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -15,5 +17,9 @@ public record Job(
 		JobStatus status,
 		Instant runAt,
 		Instant createdAt,
-		Instant updatedAt) {
+		Instant updatedAt,
+		@Nullable UUID workerId,
+		@Nullable Instant startedAt,
+		@Nullable Instant finishedAt,
+		@Nullable String lastError) {
 }
