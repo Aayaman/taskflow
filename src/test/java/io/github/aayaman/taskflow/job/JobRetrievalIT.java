@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import io.github.aayaman.taskflow.TestJobHandlers;
 import io.github.aayaman.taskflow.TestcontainersConfiguration;
@@ -26,6 +28,9 @@ class JobRetrievalIT {
 
 	@Autowired
 	private JsonMapper json;
+
+	@Autowired
+	private JdbcClient jdbc;
 
 	private JobApiClient api;
 
@@ -58,6 +63,54 @@ class JobRetrievalIT {
 		assertThat(job.path("type").asString()).isEqualTo("RESIZE_IMAGE");
 		assertThat(job.path("status").asString()).isEqualTo("PENDING");
 		assertThat(job.path("payload")).isEqualTo(json.readTree("{\"width\": 640}"));
+	}
+
+	@Test
+	void executionDetailsAreNullBeforeTheJobRuns() {
+		JsonNode job = json.readTree(api.get(submit()).body());
+
+		assertThat(job.has("startedAt")).isTrue();
+		assertThat(job.path("startedAt").isNull()).isTrue();
+		assertThat(job.path("finishedAt").isNull()).isTrue();
+		assertThat(job.path("lastError").isNull()).isTrue();
+	}
+
+	@Test
+	void showsExecutionDetailsOfFailedJob() {
+		String id = submit();
+		jdbc.sql("""
+				update jobs set status = 'FAILED', worker_id = uuidv7(),
+				    started_at = timestamptz '2026-11-21 10:00:00Z', finished_at = timestamptz '2026-11-21 10:00:05Z',
+				    last_error = 'java.lang.IllegalStateException: boom'
+				where id = cast(:id as uuid)""")
+			.param("id", id)
+			.update();
+
+		JsonNode job = json.readTree(api.get(id).body());
+
+		assertThat(job.path("status").asString()).isEqualTo("FAILED");
+		assertThat(Instant.parse(job.path("startedAt").asString())).isEqualTo(Instant.parse("2026-11-21T10:00:00Z"));
+		assertThat(Instant.parse(job.path("finishedAt").asString())).isEqualTo(Instant.parse("2026-11-21T10:00:05Z"));
+		assertThat(job.path("lastError").asString()).isEqualTo("java.lang.IllegalStateException: boom");
+	}
+
+	@Test
+	void doesNotExposeTheWorker() {
+		String id = submit();
+		jdbc.sql("update jobs set status = 'RUNNING', worker_id = uuidv7(), started_at = now() where id = cast(:id as uuid)")
+			.param("id", id)
+			.update();
+
+		JsonNode job = json.readTree(api.get(id).body());
+
+		assertThat(job.path("status").asString()).isEqualTo("RUNNING");
+		assertThat(job.path("startedAt").isNull()).isFalse();
+		assertThat(job.has("workerId")).isFalse();
+	}
+
+	private String submit() {
+		return json.readTree(api.submit("""
+				{"type": "SEND_EMAIL", "payload": {}}""").body()).path("id").asString();
 	}
 
 	@Test

@@ -79,6 +79,14 @@ class OpenApiDocumentationIT {
 	}
 
 	@Test
+	void documentsExecutionDetailsButNotTheWorker() {
+		JsonNode job = spec.path("components").path("schemas").path("JobResponse").path("properties");
+
+		assertThat(job.propertyNames()).contains("startedAt", "finishedAt", "lastError").doesNotContain("workerId");
+		assertThat(job.path("lastError").path("description").asString()).contains("4000");
+	}
+
+	@Test
 	void servesSwaggerUi() {
 		HttpResponse<String> response = get("/swagger-ui/index.html");
 
