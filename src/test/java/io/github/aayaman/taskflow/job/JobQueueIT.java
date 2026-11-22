@@ -8,6 +8,7 @@ import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -167,6 +168,75 @@ class JobQueueIT {
 		assertThat(claimed).hasSize(jobs).doesNotHaveDuplicates();
 		assertThat(jdbc.sql("select count(*) from jobs where status = 'RUNNING'").query(Integer.class).single())
 			.isEqualTo(jobs);
+	}
+
+	@Test
+	void ownerRecordsSuccess() {
+		UUID id = claimOne();
+
+		assertThat(queue.markSucceeded(id, WORKER)).isTrue();
+
+		Map<String, Object> row = row(id);
+		assertThat(row.get("status")).isEqualTo("SUCCEEDED");
+		assertThat(row.get("finished_at")).isNotNull();
+	}
+
+	@Test
+	void ownerRecordsFailureWithError() {
+		UUID id = claimOne();
+
+		assertThat(queue.markFailed(id, WORKER, "java.lang.IllegalStateException: boom")).isTrue();
+
+		Map<String, Object> row = row(id);
+		assertThat(row.get("status")).isEqualTo("FAILED");
+		assertThat(row.get("finished_at")).isNotNull();
+		assertThat(row.get("last_error")).isEqualTo("java.lang.IllegalStateException: boom");
+	}
+
+	@Test
+	void storesLongErrorsTruncated() {
+		UUID id = claimOne();
+
+		assertThat(queue.markFailed(id, WORKER, "e".repeat(JobQueue.MAX_ERROR_LENGTH + 500))).isTrue();
+
+		assertThat((String) row(id).get("last_error")).hasSize(JobQueue.MAX_ERROR_LENGTH);
+	}
+
+	@Test
+	void otherWorkerCannotRecordOutcome() {
+		UUID id = claimOne();
+		UUID other = UUID.randomUUID();
+
+		assertThat(queue.markSucceeded(id, other)).isFalse();
+		assertThat(queue.markFailed(id, other, "boom")).isFalse();
+		assertThat(statusOf(id)).isEqualTo("RUNNING");
+	}
+
+	@Test
+	void outcomeIsRecordedOnlyOnce() {
+		UUID id = claimOne();
+		queue.markSucceeded(id, WORKER);
+
+		assertThat(queue.markFailed(id, WORKER, "late failure")).isFalse();
+		assertThat(statusOf(id)).isEqualTo("SUCCEEDED");
+	}
+
+	@Test
+	void pendingJobCannotBeCompleted() {
+		UUID id = insertJob("-1 minute");
+
+		assertThat(queue.markSucceeded(id, WORKER)).isFalse();
+		assertThat(statusOf(id)).isEqualTo("PENDING");
+	}
+
+	private UUID claimOne() {
+		UUID id = insertJob("-1 minute");
+		assertThat(queue.claim(WORKER, 1)).extracting(Job::id).containsExactly(id);
+		return id;
+	}
+
+	private Map<String, Object> row(UUID id) {
+		return jdbc.sql("select status, finished_at, last_error from jobs where id = :id").param("id", id).query().singleRow();
 	}
 
 	private UUID insertJob(String runAtOffset) {

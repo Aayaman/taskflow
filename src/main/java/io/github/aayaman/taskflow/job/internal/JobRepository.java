@@ -103,6 +103,33 @@ public class JobRepository {
 			.toList();
 	}
 
+	/**
+	 * Moves a RUNNING job held by {@code workerId} to SUCCEEDED. Returns {@code false} if
+	 * the job is not RUNNING or belongs to another worker; nothing is changed then.
+	 */
+	public boolean markSucceeded(UUID id, UUID workerId) {
+		return jdbc.sql("""
+				update jobs set status = 'SUCCEEDED', finished_at = now(), updated_at = now()
+				where id = :id and status = 'RUNNING' and worker_id = :worker""")
+			.param("id", id)
+			.param("worker", workerId)
+			.update() == 1;
+	}
+
+	/**
+	 * Moves a RUNNING job held by {@code workerId} to FAILED with the given error. Returns
+	 * {@code false} if the job is not RUNNING or belongs to another worker.
+	 */
+	public boolean markFailed(UUID id, UUID workerId, String error) {
+		return jdbc.sql("""
+				update jobs set status = 'FAILED', finished_at = now(), last_error = :error, updated_at = now()
+				where id = :id and status = 'RUNNING' and worker_id = :worker""")
+			.param("id", id)
+			.param("worker", workerId)
+			.param("error", error)
+			.update() == 1;
+	}
+
 	public record KeyedJob(Job job, boolean sameRequest) {
 	}
 

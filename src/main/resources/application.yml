@@ -50,3 +50,11 @@ springdoc:
   # The spec (/v3/api-docs) and Swagger UI (/swagger-ui.html) are public for local
   # development. Restrict or disable them before deploying (M8).
   default-produces-media-type: application/json
+
+taskflow:
+  worker:
+    # Same deployable, two roles: set to false for API-only instances.
+    enabled: true
+    concurrency: 4
+    poll-interval: 1s
+    shutdown-timeout: 30s
